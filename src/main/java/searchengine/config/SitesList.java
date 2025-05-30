@@ -12,5 +12,9 @@ import java.util.List;
 @Component
 @ConfigurationProperties(prefix = "indexing-settings")
 public class SitesList {
+    private String userAgent;
+    private String referrer;
+    private long crawlDelayMs;
     private List<Site> sites;
 }
+
