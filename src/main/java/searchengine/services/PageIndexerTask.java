@@ -77,7 +77,6 @@ public class PageIndexerTask extends RecursiveAction {
 
             String normalizedPath = normalizePath(path);
 
-            // Удаление предыдущей версии страницы
             pageRepos.findByPathAndSiteModel(normalizedPath, siteModel).ifPresent(existingPage -> {
                 searchIndexRepos.deleteAllByPage(existingPage);
                 pageRepos.delete(existingPage);

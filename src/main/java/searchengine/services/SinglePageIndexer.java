@@ -47,7 +47,6 @@ public class SinglePageIndexer {
 
             String path = normalizePath(url.replace(siteModel.getUrl(), ""));
 
-            // Удалить старую страницу, если существует
             pageRepos.findByPathAndSiteModel(path, siteModel).ifPresent(existing -> {
                 searchIndexRepos.deleteAllByPage(existing);
                 pageRepos.delete(existing);

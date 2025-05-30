@@ -137,7 +137,6 @@ public class IndexingServiceImpl implements IndexingService {
             return false;
         }
 
-        // Проверка: входит ли в список сайтов из конфигурации
         Optional<Site> configSiteOpt = sitesList.getSites().stream()
                 .filter(site -> url.startsWith(site.getUrl()))
                 .findFirst();
@@ -165,7 +164,6 @@ public class IndexingServiceImpl implements IndexingService {
             String rawPath = url.replace(site.getUrl(), "").split("#")[0];
             String path = rawPath.isEmpty() ? "/" : (rawPath.startsWith("/") ? rawPath : "/" + rawPath);
 
-            // Удаление старой версии страницы
             pageRepos.findByPathAndSiteModel(path, site).ifPresent(oldPage -> {
                 searchIndexRepos.deleteAllByPage(oldPage);
                 pageRepos.delete(oldPage);
