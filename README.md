@@ -61,7 +61,7 @@ Heliont Search Engine — это поисковый движок с веб-кр�
 
 ### Шаги запуска
 1. Клонируйте репозиторий:
-git clone https://github.com/yourusername/heliont-search-engine.gitcd heliont-search-engine
+git clone https://github.com/floodxv/heliont-search-engine heliont-search-engine
 2. Настройте базу данных MySQL:
 Создайте базу данных: CREATE DATABASE search_engine CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 В файле src/main/resources/application.yml отредактируйте параметры подключения к БД (username, password, url).
