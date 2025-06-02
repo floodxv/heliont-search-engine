@@ -122,14 +122,12 @@ public class ApiController {
         }
     }
 
-    // Метод POST /api/indexPage для индексации одной страницы
     @PostMapping("/indexPage")
     public ResponseEntity<Map<String, Object>> indexPage(@RequestParam("url") String url) {
         log.info("Запрос на индексацию страницы: {}", url);
 
         Map<String, Object> response = new HashMap<>();
 
-        // Проверка, входит ли url в список сайтов из конфигурации
         boolean urlValid = sitesList.getSites().stream()
                 .anyMatch(site -> url.startsWith(site.getUrl()));
 
