@@ -1,4 +1,4 @@
-package searchengine.services;
+package searchengine.servicesImpl;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -12,6 +12,7 @@ import searchengine.model.Status;
 import searchengine.repository.LemmaRepos;
 import searchengine.repository.PageRepos;
 import searchengine.repository.SiteRepos;
+import searchengine.services.StatisticsService;
 
 import java.util.ArrayList;
 import java.util.List;

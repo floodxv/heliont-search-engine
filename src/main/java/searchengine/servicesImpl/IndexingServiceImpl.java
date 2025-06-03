@@ -1,4 +1,4 @@
-package searchengine.services;
+package searchengine.servicesImpl;
 
 
 import org.jsoup.Jsoup;
@@ -15,13 +15,16 @@ import searchengine.repository.LemmaRepos;
 import searchengine.repository.PageRepos;
 import searchengine.repository.SearchIndexRepos;
 import searchengine.repository.SiteRepos;
+import searchengine.services.IndexingService;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 @Service
 public class IndexingServiceImpl implements IndexingService {
@@ -34,7 +37,7 @@ public class IndexingServiceImpl implements IndexingService {
     private final SearchIndexRepos searchIndexRepos;
     private final SitesList sitesList;
 
-    private volatile boolean indexingInProgress = false;
+    private final AtomicBoolean indexingInProgress = new AtomicBoolean(false);
     private final AtomicBoolean stopRequested = new AtomicBoolean(false);
 
     public IndexingServiceImpl(SiteRepos siteRepos,
@@ -51,17 +54,19 @@ public class IndexingServiceImpl implements IndexingService {
 
     @Override
     public synchronized boolean startIndexing() {
-        if (indexingInProgress) {
+        if (indexingInProgress.get()) {
             log.info("Индексация уже запущена");
             return false;
         }
 
-        indexingInProgress = true;
+        indexingInProgress.set(true);
         stopRequested.set(false);
-        log.info("Индексация началась");
 
+        log.info("Индексация началась");
+        ForkJoinPool forkJoinPool = new ForkJoinPool();
+        forkJoinPool.execute(() -> {
         try {
-            ForkJoinPool forkJoinPool = new ForkJoinPool();
+            List<ForkJoinTask<?>> tasks = new ArrayList<>();
 
             for (searchengine.config.Site configSite : sitesList.getSites()) {
                 SiteModel existingSite = siteRepos.findByUrl(configSite.getUrl());
@@ -80,36 +85,43 @@ public class IndexingServiceImpl implements IndexingService {
                 siteModel.setStatusTime(LocalDateTime.now());
                 siteModel.setLastError("");
                 siteRepos.save(siteModel);
-
-                forkJoinPool.execute(new SiteIndexer(
+                SiteIndexer siteIndexerTask = new SiteIndexer(
                         siteModel,
                         siteRepos,
                         pageRepos,
                         lemmaRepos,
                         searchIndexRepos,
                         stopRequested
-                ));
+                );
+
+                ForkJoinTask<?> task = forkJoinPool.submit(siteIndexerTask);
+                tasks.add(task);
 
                 log.info("Индексация сайта {} запущена", siteModel.getUrl());
             }
-
-            return true;
+            for (ForkJoinTask<?> task : tasks) {
+                task.join();
+            }
+            indexingInProgress.set(false);
+            log.info("Индексация всех сайтов завершена");
 
         } catch (Exception e) {
             log.error("Ошибка при запуске индексации: {}", e.getMessage());
-            indexingInProgress = false;
-            return false;
+        }finally {
+            indexingInProgress.set(false);
         }
-    }
+        });
+            return true;
+        }
 
     @Override
     public boolean stopIndexing() {
-        if (!indexingInProgress) {
+        stopRequested.set(true);
+        if (!indexingInProgress.get()) {
             log.info("Индексация не запущена");
             return false;
         }
-
-        stopRequested.set(true);
+        indexingInProgress.set(false);
 
         List<SiteModel> indexingSites = siteRepos.findAllByStatus(Status.INDEXING);
         for (SiteModel siteModel : indexingSites) {
@@ -119,14 +131,13 @@ public class IndexingServiceImpl implements IndexingService {
             siteRepos.save(siteModel);
         }
 
-        indexingInProgress = false;
         log.info("Индексация остановлена пользователем");
         return true;
     }
 
     @Override
     public boolean isIndexing() {
-        return indexingInProgress;
+        return indexingInProgress.get();
     }
 
     @Override
@@ -210,7 +221,7 @@ public class IndexingServiceImpl implements IndexingService {
 
         } catch (IOException e) {
             log.error("Ошибка при индексации страницы {}: {}", url, e.getMessage(), e);
-            return false;
+            return true;
         }
     }
 }

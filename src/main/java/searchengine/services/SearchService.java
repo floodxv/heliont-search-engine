@@ -28,15 +28,22 @@ public class SearchService {
     private final LemmaRepos lemmaRepos;
     private final SearchIndexRepos searchIndexRepos;
     private final SiteRepos siteRepos;
-    private final SitesList sitesList;
 
-    private static final double MAX_LEMMA_FREQUENCY_PERCENT = 0.7;
-
-    public SearchResponse search(String query, String siteUrl, int offset, int limit) {
-        if (query == null || query.isBlank()) {
-            throw new IllegalArgumentException("Задан пустой поисковый запрос");
+    public void validateQuery(String query){
+        if (query == null || query.trim().isEmpty()) {
+            throw new IllegalArgumentException("Поисковый запрос не может быть пустым");
         }
 
+        if (query.length() > 100) {
+            throw new IllegalArgumentException("Поисковый запрос слишком длинный");
+        }
+
+        if (!query.matches("[a-zA-Zа-яА-Я0-9\\s]+")) {
+            throw new IllegalArgumentException("Поисковый запрос содержит недопустимые символы");
+        }
+
+    }
+    public List<SiteModel>getSitesToSearch(String siteUrl) {
         List<SiteModel> sitesToSearch;
         if (siteUrl == null || siteUrl.isBlank()) {
             sitesToSearch = siteRepos.findAll().stream()
@@ -50,35 +57,33 @@ public class SearchService {
             }
             sitesToSearch = List.of(site);
         }
+        return sitesToSearch;
+    }
 
-        if (sitesToSearch.isEmpty()) {
-            return new SearchResponse(false, 0, Collections.emptyList());
+    public List<SiteModel> validateSitesIndexed(List<SiteModel> sites){
+        if (sites.isEmpty()) {
+            throw new IllegalStateException("Нет проиндексированных сайтов для поиска");
         }
+        return sites;
+    }
 
-        long totalPages = sitesToSearch.stream()
-                .mapToLong(pageRepos::countBySiteModel)
-                .sum();
-
+    public List<String> extractQueryLemmas(String query, List<SiteModel> sitesToSearch) {
         Map<String, Integer> queryLemmas = Lemmatizer.getLemmaCounts(query);
-
         if (queryLemmas.isEmpty()) {
-            return new SearchResponse(false, 0, Collections.emptyList());
+            return Collections.emptyList();
         }
-
         List<String> filteredLemmas = new ArrayList<>(queryLemmas.keySet());
-
-        if (filteredLemmas.isEmpty()) {
-            return new SearchResponse(false, 0, Collections.emptyList());
-        }
-
         filteredLemmas.sort(Comparator.comparingLong(
                 lemma -> lemmaRepos.countPagesByLemma(lemma, sitesToSearch))
         );
+        return filteredLemmas;
+    }
 
-        List<Page> candidatePages = pageRepos.findPagesByLemma(filteredLemmas.get(0), sitesToSearch);
+    public List<Page> findCandidatePages(List<String> lemmas, List<SiteModel> sitesToSearch){
+        List<Page> candidatePages = pageRepos.findPagesByLemma(lemmas.get(0), sitesToSearch);
 
-        for (int i = 1; i < filteredLemmas.size(); i++) {
-            String lemmaStr = filteredLemmas.get(i);
+        for (int i = 1; i < lemmas.size(); i++) {
+            String lemmaStr = lemmas.get(i);
             candidatePages = candidatePages.stream()
                     .filter(page -> {
                         Lemma lemma = lemmaRepos.findByLemmaAndSiteModel(lemmaStr, page.getSiteModel()).orElse(null);
@@ -87,15 +92,14 @@ public class SearchService {
                     .collect(Collectors.toList());
             if (candidatePages.isEmpty()) break;
         }
+        return candidatePages;
+    }
 
-        if (candidatePages.isEmpty()) {
-            return new SearchResponse(true, 0, Collections.emptyList());
-        }
-
+    public Map<Page, Double> calculateAbsoluteRelevance(List<Page> pages, List<String> lemmas){
         Map<Page, Double> absRelevanceMap = new HashMap<>();
-        for (Page page : candidatePages) {
+        for (Page page : pages) {
             double absRelevance = 0;
-            for (String lemmaStr : filteredLemmas) {
+            for (String lemmaStr : lemmas) {
                 Lemma lemma = lemmaRepos.findByLemmaAndSiteModel(lemmaStr, page.getSiteModel()).orElse(null);
                 if (lemma != null) {
                     Double rank = searchIndexRepos.findRankByPageAndLemma(page, lemma);
@@ -106,22 +110,33 @@ public class SearchService {
             }
             absRelevanceMap.put(page, absRelevance);
         }
+        return absRelevanceMap;
+    }
 
+    public List<SearchResultItem> buildSearchResults(
+            List<Page> pages,
+            Map<Page, Double> absRelevanceMap,
+            List<String> lemmas,
+            int offset,
+            int limit,
+            String query
+    ) {
         double maxAbsRelevance = absRelevanceMap.values().stream()
                 .max(Double::compare)
                 .orElse(1.0);
 
-        List<SearchResultItem> results = candidatePages.stream()
+        return pages.stream()
                 .map(page -> {
                     SiteModel site = page.getSiteModel();
                     double relRelevance = absRelevanceMap.get(page) / maxAbsRelevance;
                     String snippet = buildSnippet(page.getContent(), query);
+                    String title = extractTitle(page.getContent());
 
                     return new SearchResultItem(
                             site.getUrl(),
                             site.getName(),
                             page.getPath(),
-                            extractTitle(page.getContent()),
+                            title,
                             snippet,
                             relRelevance
                     );
@@ -130,8 +145,30 @@ public class SearchService {
                 .skip(offset)
                 .limit(limit)
                 .collect(Collectors.toList());
+    }
 
-        return new SearchResponse(true, candidatePages.size(), results);
+    public SearchResponse search(String query, String siteUrl, int offset, int limit) {
+        try {
+            validateQuery(query);
+            List<SiteModel> sites = validateSitesIndexed(getSitesToSearch(siteUrl));
+            List<String> lemmas = extractQueryLemmas(query, sites);
+
+            if (lemmas.isEmpty()) {
+                return new SearchResponse(false, 0, Collections.emptyList());
+            }
+
+            List<Page> candidatePages = findCandidatePages(lemmas, sites);
+            if (candidatePages.isEmpty()) {
+                return new SearchResponse(true, 0, Collections.emptyList());
+            }
+
+            Map<Page, Double> absRelevanceMap = calculateAbsoluteRelevance(candidatePages, lemmas);
+            List<SearchResultItem> results = buildSearchResults(candidatePages, absRelevanceMap, lemmas, offset, limit, query);
+
+            return new SearchResponse(true, candidatePages.size(), results);
+        } catch (Exception e) {
+            return new SearchResponse(false, 0, Collections.emptyList());
+        }
     }
 
     private String extractTitle(String htmlContent) {

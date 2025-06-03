@@ -1,4 +1,4 @@
-package searchengine.services;
+package searchengine.servicesImpl;
 
 
 import lombok.extern.slf4j.Slf4j;
