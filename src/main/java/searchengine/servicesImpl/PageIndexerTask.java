@@ -75,13 +75,20 @@ public class PageIndexerTask extends RecursiveAction {
                     .timeout(10000)
                     .get();
 
+            if (stopRequested.get()) {
+                log.info("Остановка после загрузки страницы {}", fullUrl);
+                return;
+            }
+
             String normalizedPath = normalizePath(path);
 
+            if (stopRequested.get()) return;
             pageRepos.findByPathAndSiteModel(normalizedPath, siteModel).ifPresent(existingPage -> {
                 searchIndexRepos.deleteAllByPage(existingPage);
                 pageRepos.delete(existingPage);
             });
 
+            if (stopRequested.get()) return;
             Page page = new Page();
             page.setSiteModel(siteModel);
             page.setPath(normalizedPath);
@@ -90,9 +97,15 @@ public class PageIndexerTask extends RecursiveAction {
             page.setText(doc.text());
             pageRepos.save(page);
 
+            if (stopRequested.get()) return;
             Map<String, Integer> lemmaCounts = Lemmatizer.getLemmaCounts(doc.text());
 
             for (Map.Entry<String, Integer> entry : lemmaCounts.entrySet()) {
+                if (stopRequested.get()) {
+                    log.info("Остановка во время обработки лемм на {}", fullUrl);
+                    return;
+                }
+
                 String lemmaText = entry.getKey();
                 int countInPage = entry.getValue();
 
@@ -118,7 +131,10 @@ public class PageIndexerTask extends RecursiveAction {
             Elements links = doc.select("a[href]");
 
             for (Element link : links) {
-                if (stopRequested.get()) break;
+                if (stopRequested.get()) {
+                    log.info("Остановка в цикле ссылок страницы {}", fullUrl);
+                    break;
+                }
 
                 String absHref = link.absUrl("href").split("#")[0].trim();
 
@@ -149,7 +165,17 @@ public class PageIndexerTask extends RecursiveAction {
                 log.warn("Обнаружено более 10000 страниц на {}. Возможно, зацикливание!", siteModel.getUrl());
             }
 
+            if (stopRequested.get()) {
+                log.info("Остановка перед запуском подзадач для {}", fullUrl);
+                return;
+            }
+
             invokeAll(subTasks);
+
+            if (stopRequested.get()) {
+                log.info("Остановка после выполнения подзадач для {}", fullUrl);
+                return;
+            }
 
             siteModel.setStatusTime(LocalDateTime.now());
             siteRepos.save(siteModel);

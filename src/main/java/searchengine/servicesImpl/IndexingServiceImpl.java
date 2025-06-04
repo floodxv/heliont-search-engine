@@ -65,54 +65,54 @@ public class IndexingServiceImpl implements IndexingService {
         log.info("Индексация началась");
         ForkJoinPool forkJoinPool = new ForkJoinPool();
         forkJoinPool.execute(() -> {
-        try {
-            List<ForkJoinTask<?>> tasks = new ArrayList<>();
+            try {
+                List<ForkJoinTask<?>> tasks = new ArrayList<>();
 
-            for (searchengine.config.Site configSite : sitesList.getSites()) {
-                SiteModel existingSite = siteRepos.findByUrl(configSite.getUrl());
+                for (searchengine.config.Site configSite : sitesList.getSites()) {
+                    SiteModel existingSite = siteRepos.findByUrl(configSite.getUrl());
 
-                if (existingSite != null) {
-                    searchIndexRepos.deleteAllBySiteModel(existingSite);
-                    lemmaRepos.deleteAllBySiteModel(existingSite);
-                    pageRepos.deleteBySiteModel(existingSite);
-                    siteRepos.delete(existingSite);
+                    if (existingSite != null) {
+                        searchIndexRepos.deleteAllBySiteModel(existingSite);
+                        lemmaRepos.deleteAllBySiteModel(existingSite);
+                        pageRepos.deleteBySiteModel(existingSite);
+                        siteRepos.delete(existingSite);
+                    }
+
+                    SiteModel siteModel = new SiteModel();
+                    siteModel.setName(configSite.getName());
+                    siteModel.setUrl(configSite.getUrl());
+                    siteModel.setStatus(Status.INDEXING);
+                    siteModel.setStatusTime(LocalDateTime.now());
+                    siteModel.setLastError("");
+                    siteRepos.save(siteModel);
+                    SiteIndexer siteIndexerTask = new SiteIndexer(
+                            siteModel,
+                            siteRepos,
+                            pageRepos,
+                            lemmaRepos,
+                            searchIndexRepos,
+                            stopRequested
+                    );
+
+                    ForkJoinTask<?> task = forkJoinPool.submit(siteIndexerTask);
+                    tasks.add(task);
+
+                    log.info("Индексация сайта {} запущена", siteModel.getUrl());
                 }
+                for (ForkJoinTask<?> task : tasks) {
+                    task.join();
+                }
+                indexingInProgress.set(false);
+                log.info("Индексация всех сайтов завершена");
 
-                SiteModel siteModel = new SiteModel();
-                siteModel.setName(configSite.getName());
-                siteModel.setUrl(configSite.getUrl());
-                siteModel.setStatus(Status.INDEXING);
-                siteModel.setStatusTime(LocalDateTime.now());
-                siteModel.setLastError("");
-                siteRepos.save(siteModel);
-                SiteIndexer siteIndexerTask = new SiteIndexer(
-                        siteModel,
-                        siteRepos,
-                        pageRepos,
-                        lemmaRepos,
-                        searchIndexRepos,
-                        stopRequested
-                );
-
-                ForkJoinTask<?> task = forkJoinPool.submit(siteIndexerTask);
-                tasks.add(task);
-
-                log.info("Индексация сайта {} запущена", siteModel.getUrl());
+            } catch (Exception e) {
+                log.error("Ошибка при запуске индексации: {}", e.getMessage());
+            }finally {
+                indexingInProgress.set(false);
             }
-            for (ForkJoinTask<?> task : tasks) {
-                task.join();
-            }
-            indexingInProgress.set(false);
-            log.info("Индексация всех сайтов завершена");
-
-        } catch (Exception e) {
-            log.error("Ошибка при запуске индексации: {}", e.getMessage());
-        }finally {
-            indexingInProgress.set(false);
-        }
         });
-            return true;
-        }
+        return true;
+    }
 
     @Override
     public boolean stopIndexing() {
